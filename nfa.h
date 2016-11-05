@@ -1,24 +1,23 @@
-#include <string>
+#ifndef NFA_H
+#define NFA_H
 
-struct State;
-struct Edge
-{
-    int match_content;
-    State *to_state;
-};
+#include <vector>
+#include <string>
 
 struct State
 {
-    unsigned sequence;
-    Edge e1;
-    Edge e2;
+    int state;
+    State *next1;
+    State *next2;
 };
 
 struct Fragment
 {
     State *start;
-    State *end;
+    std::vector<State*> ends;
 };
 
-State *post2nfa(const std::string &s);
-bool match(const std::string &str, State *start);
+State* post2nfa(const std::string &s);
+bool match(const std::string &str, State* start);
+
+#endif		// NFA_H
