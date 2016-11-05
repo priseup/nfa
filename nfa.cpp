@@ -2,92 +2,68 @@
 #include <string>
 #include <vector>
 #include <stack>
-#include <utility>
-#include <algorithm>
 
-unsigned state_id = 0;
-
-inline State *createState(unsigned i, Edge e1, Edge e2)
+enum 
 {
-    State *s = new State{i, e1, e2};
+    SPLIT = 257,
+    END = 258
+};
 
-    return s;
+inline State* createState(int c)
+{
+    return new State{c, nullptr, nullptr};
 }
 
-Fragment constructFragment(char c)
-{
-    Edge e{-2, nullptr};
-
-    State *start = createState(state_id++, e, e);
-    State *end = createState(state_id++, e, e);
-
-    start->e1 = {c, end};
-
-    return {start, end};
-}
-
-State *post2nfa(const std::string &s)
+State* post2nfa(const std::string &str)
 {
     std::stack<Fragment> sf;
-    State *s1 = nullptr, *s2 = nullptr;
 
-    for (auto c : s)    
+    for (auto c : str)    
     {
         switch (c)
         {
         case '?':
             {
-                auto f = sf.top();
+                auto f =  sf.top();
                 sf.pop();
 
-                Edge e1{-1, f.start};
-                Edge e2{-2, nullptr};
+                auto split = createState(SPLIT);
 
-                s1 = createState(state_id++, e1, e2);
-                s2 = createState(state_id++, e2, e2);
+                split->next2 = f.start;
 
-                s1->e2 = {-1, s2};
-                f.end->e2 = {-1, s2};
+                auto ends = f.ends;
+                ends.push_back(split);
 
-                sf.push(Fragment{s1, s2});
+                sf.push(Fragment{split, ends});
                 break;
-            }
+           }
         case '+':
             {
-                auto f = sf.top();
-                sf.pop();
+                auto f =  sf.top();
 
-                Edge e1{-1, f.start};
-                Edge e2{-2, nullptr};
+                for (auto end : f.ends)
+                    end->next2 = f.start;
 
-                s1 = createState(state_id++, e1, e2);
-                s2 = createState(state_id++, e2, e2);
-
-                f.end->e1 = {-1, f.start};
-                f.end->e2 = {-1, s2};
-
-                sf.push(Fragment{s1, s2});
                 break;
             }
         case '*':
             {
-                auto f = sf.top();
+                auto f =  sf.top();
                 sf.pop();
 
-                Edge e1{-1, f.start};
-                Edge e2{-2, nullptr};
+                auto split = createState(SPLIT);
 
-                s1 = createState(state_id++, e1, e2);
-                s2 = createState(state_id++, e2, e2);
+                split->next2 = f.start;
 
-                s1->e2 = {-1, s2};
+                for (auto end : f.ends)
+                    end->next2 = f.start;
 
-                f.end->e2 = {-1, f.start};
-                f.end->e1 = {-1, s2};
+                auto ends = f.ends;
+                ends.push_back(split);
 
-                sf.push(Fragment{s1, s2});
+                sf.push(Fragment{split, ends});
                 break;
-            }
+           }
         case '|':
             {
                 auto second =  sf.top();
@@ -95,17 +71,16 @@ State *post2nfa(const std::string &s)
                 auto first = sf.top();
                 sf.pop();
 
-                Edge e1{-1, first.start};
-                Edge e2{-1, second.start};
-                s1 = createState(state_id++, e1, e2);
+                auto split = createState(SPLIT);
 
-                e1 = e2 = {-2, nullptr};
-                s2 = createState(state_id++, e1, e2);
+                split->next1 = first.start;
+                split->next2 = second.start;
 
-                first.end->e1 = {-1, s2};
-                second.end->e1 = {-1, s2};
+                auto ends = first.ends;
+                ends.insert(ends.end(), second.ends.begin(), second.ends.end());
 
-                sf.push(Fragment{s1, s2});
+                sf.push(Fragment{split, ends});
+
                 break;
             }
         case '~':
@@ -115,106 +90,83 @@ State *post2nfa(const std::string &s)
                 auto first = sf.top();
                 sf.pop();
 
-                first.end->e1 = {-1, second.start};
+                for (auto end : first.ends)
+                    end->next1 = second.start;
 
-                sf.push(Fragment{first.start, second.end});
+                sf.push(Fragment{first.start, second.ends});
                 break;
             }
         default:
             {
-                sf.push(std::move(constructFragment(c)));
+                auto s = createState(c);
+
+                sf.push(Fragment{s, std::vector<State*>{s}});
                 break;
             }
         }
     }
 
+    // the END flag
+    auto s = createState(END);
+    for (auto end : sf.top().ends)
+        end->next1 = s;
+
     return sf.top().start;
 }
 
-std::vector<Edge> addState(State *s)
+void addState(State *s, std::vector<State*> &next)
 {
-    std::vector<Edge> next;
-	if (s->e1.match_content != -1
-		&& s->e1.match_content != -2)
-	{
-		next.push_back(s->e1);
-		return next;
-	}
-    while (s->e1.match_content == -1
-        && s->e2.match_content == -2)
-    {
-        s = s->e1.to_state;
-    }
+    if (s == nullptr)
+        return;
 
-    if (s->e1.match_content == -1
-        && s->e1.match_content == -1)
-    {
-		auto tmp = addState(s->e1.to_state);
-        next.insert(next.end(), tmp.begin(), tmp.end());
-        
-		tmp = addState(s->e2.to_state);
-		next.insert(next.end(), tmp.begin(), tmp.end());
+	if (s->state != SPLIT)
+	{
+		next.push_back(s);
+		return ;
 	}
-    
-    return next;
+    else
+    {
+		addState(s->next1, next);
+		addState(s->next2, next);
+    }
 }
 
-bool is_match(const std::vector<Edge> &es)
+bool is_match(const std::vector<State*> states)
 {
-    auto end_id = --state_id;
-    
-	for (auto edge : es)
-	{
-		auto state = edge.to_state;
-		while (state && state->sequence != end_id)
-		{
-			state = state->e1.to_state;
-		}
-		if (state && state->sequence == end_id)
-			return true;
-	}
+    for (auto state : states)
+    {
+        if (state->state == END)
+            return true;
+    }
 
     return false;
 }
 
-void step(std::vector<Edge> &current, int c, std::vector<Edge> &next)
+void step(std::vector<State*> &current, int c, std::vector<State*> &next)
 {
-    for (auto edge : current)
+    for (auto state : current)
     {
-        if (edge.match_content == c)
+        if (state->state == c)
         {
-            auto edges = addState(edge.to_state);
-			next.insert(next.end(), edges.begin(), edges.end());
+            addState(state->next1, next);
+            addState(state->next2, next);
 		}
-
     }
+    current = next;
+    next.clear();
 }
 
 bool match(const std::string &str, State *start)
 {
-    auto current_edges = addState(start);
-    decltype(current_edges) next_edges;
+    std::vector<State*> current_states, next_states;
 
+    addState(start, current_states);
     for (auto c : str)
     {
-        step(current_edges, c, next_edges);
-		if (next_edges.empty())
-		{
-			for (auto it = current_edges.begin();
-				it != current_edges.end(); ++it)
-				if (it->match_content != c)
-				{
-					it = current_edges.erase(it);
-					if (it == current_edges.end())
-						break;
-				}
-		}
-		else
-		{
-			current_edges = next_edges;
-		}
-        next_edges.clear();
+        step(current_states, c, next_states);
     }
 
-    return is_match(current_edges);
+    return is_match(current_states);
 }
+
+
